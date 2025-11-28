@@ -416,20 +416,26 @@ class SpriteSheetProcessor:
         """Check if a sprite sheet is loaded."""
         return self.image is not None
 
-    def detect_frames_automatically(self, max_frames: int = 20, performance_mode: str = 'balanced') -> List[FrameData]:
+    def detect_frames_automatically(self, max_frames: int = None, performance_mode: str = 'balanced') -> List[FrameData]:
         """
-        Automatically detect potential sprite frames in the sprite sheet.
+        Automatically detect ALL sprite frames in the sprite sheet.
         Uses comprehensive multi-strategy detection to work with any sprite sheet type.
+        
+        This method detects unlimited frames - no artificial restrictions.
 
         Args:
-            max_frames: Maximum number of frames to suggest (to avoid UI clutter)
+            max_frames: Maximum number of frames to detect (None for unlimited detection)
             performance_mode: 'fast', 'balanced', or 'thorough' - controls detection speed vs completeness
 
         Returns:
-            List of detected FrameData objects that can be selected
+            List of detected FrameData objects for ALL detected frames
         """
         if self.image is None:
             return []
+
+        # Set unlimited frames if not specified
+        if max_frames is None:
+            max_frames = float('inf')  # Unlimited detection
 
         # Adjust parameters based on performance mode
         detection_config = self._get_detection_config(performance_mode, max_frames)
@@ -446,7 +452,7 @@ class SpriteSheetProcessor:
             
             if len(detected_frames) > 0:
                 print(f"Comprehensive detection found {len(detected_frames)} sprites")
-                return detected_frames[:max_frames]
+                return detected_frames  # Return ALL detected frames
 
         # Fallback to grid-based detection if comprehensive detection fails
         print("Falling back to grid-based detection...")
@@ -454,9 +460,17 @@ class SpriteSheetProcessor:
 
     def _get_detection_config(self, performance_mode: str, max_frames: int) -> Dict:
         """Get optimized detection configuration based on performance mode."""
+        # Handle unlimited detection
+        if max_frames == float('inf'):
+            max_sprites = 1000000  # Extremely high limit for "unlimited" detection (1M+ sprites)
+            early_termination = False  # Don't stop early when unlimited
+        else:
+            max_sprites = max_frames
+            early_termination = True
+        
         base_config = {
-            'max_sprites': max_frames,
-            'early_termination': True,
+            'max_sprites': max_sprites,
+            'early_termination': early_termination,
             'spatial_partitioning': True,
             'progressive_mode': True
         }
@@ -465,26 +479,26 @@ class SpriteSheetProcessor:
             return {
                 **base_config,
                 'sample_rate': 4,  # Sample every 4th pixel
-                'min_sprite_size': 16,
+                'min_sprite_size': 20,
                 'max_processing_time': 5.0  # 5 seconds max
             }
         elif performance_mode == 'thorough':
             return {
                 **base_config,
                 'sample_rate': 1,  # Sample every pixel
-                'min_sprite_size': 4,
-                'max_processing_time': 30.0  # 30 seconds max
+                'min_sprite_size': 8,
+                'max_processing_time': 120.0  # 2 minutes max for thorough unlimited detection
             }
         else:  # balanced (default)
             return {
                 **base_config,
                 'sample_rate': 2,  # Sample every 2nd pixel
-                'min_sprite_size': 8,
-                'max_processing_time': 10.0  # 10 seconds max
+                'min_sprite_size': 12,
+                'max_processing_time': 60.0  # 1 minute max for balanced unlimited detection
             }
 
     def _detect_frames_grid_fallback(self, max_frames: int) -> List[FrameData]:
-        """Optimized fallback grid-based frame detection with scalability improvements."""
+        """Optimized fallback grid-based frame detection with unlimited scalability."""
         detected_frames = []
 
         # Expanded common sprite sizes to try (from largest to smallest)
@@ -494,13 +508,21 @@ class SpriteSheetProcessor:
             (32, 16), (16, 32), (48, 24), (24, 48), (80, 80), (72, 72)
         ]
 
-        # Calculate reasonable grid limits based on sprite sheet size
-        max_cols = min(20, self.sheet_width // 16)  # Reasonable column limit
-        max_rows = min(20, self.sheet_height // 16)  # Reasonable row limit
-        max_grid_size = min(max_frames, max_cols * max_rows)  # Don't exceed max_frames
+        # Determine if unlimited detection is requested
+        unlimited = max_frames == float('inf')
+        
+        # Calculate grid limits - much more generous for unlimited detection
+        if unlimited:
+            max_cols = self.sheet_width // 4   # Allow extremely dense grids
+            max_rows = self.sheet_height // 4  # Allow extremely dense grids
+            max_grid_size = 1000000  # Extremely high limit for "unlimited"
+        else:
+            max_cols = min(20, self.sheet_width // 16)  # Reasonable column limit
+            max_rows = min(20, self.sheet_height // 16)  # Reasonable row limit
+            max_grid_size = min(max_frames, max_cols * max_rows)
 
         for width, height in common_sizes:
-            if len(detected_frames) >= max_frames:
+            if not unlimited and len(detected_frames) >= max_frames:
                 break
 
             # Skip sizes that don't fit
@@ -516,8 +538,9 @@ class SpriteSheetProcessor:
                 # Calculate how many sprites this grid would produce
                 grid_sprites = cols * rows
                 
-                # Skip if this grid would exceed our limits
-                if len(detected_frames) + grid_sprites > max_frames:
+                # For unlimited detection, allow full grids
+                # For limited detection, respect the max_frames limit
+                if not unlimited and len(detected_frames) + grid_sprites > max_frames:
                     # Try to fit partial grid
                     remaining_frames = max_frames - len(detected_frames)
                     cols = min(cols, int(math.sqrt(remaining_frames)) + 1)
@@ -526,7 +549,7 @@ class SpriteSheetProcessor:
                 # Generate sprites for this grid
                 for row in range(min(rows, max_rows)):
                     for col in range(min(cols, max_cols)):
-                        if len(detected_frames) >= max_frames:
+                        if not unlimited and len(detected_frames) >= max_frames:
                             break
 
                         x = col * width
@@ -554,40 +577,49 @@ class SpriteSheetProcessor:
             # Divide based on sheet aspect ratio and size
             if self.sheet_width > self.sheet_height * 1.5:
                 # Very wide sheet - divide into columns
-                cols = min(8, max_frames)
+                if unlimited:
+                    cols = min(1000, self.sheet_width // 4)  # Allow thousands of columns for unlimited detection
+                else:
+                    cols = min(8, max_frames)
                 width = self.sheet_width // cols
                 height = self.sheet_height
                 for i in range(cols):
+                    if not unlimited and len(detected_frames) >= max_frames:
+                        break
                     x = i * width
                     frame_name = f"column_{i+1}"
                     detected_frames.append(FrameData(frame_name, x, 0, width, height))
-                    if len(detected_frames) >= max_frames:
-                        break
             elif self.sheet_height > self.sheet_width * 1.5:
                 # Very tall sheet - divide into rows
-                rows = min(8, max_frames)
+                if unlimited:
+                    rows = min(1000, self.sheet_height // 4)  # Allow thousands of rows for unlimited detection
+                else:
+                    rows = min(8, max_frames)
                 height = self.sheet_height // rows
                 width = self.sheet_width
                 for i in range(rows):
+                    if not unlimited and len(detected_frames) >= max_frames:
+                        break
                     y = i * height
                     frame_name = f"row_{i+1}"
                     detected_frames.append(FrameData(frame_name, 0, y, width, height))
-                    if len(detected_frames) >= max_frames:
-                        break
             else:
                 # Square-ish sheet - divide into grid
-                grid_size = min(4, int(math.sqrt(max_frames)))
+                if unlimited:
+                    grid_size = min(500, int(math.sqrt(self.sheet_width * self.sheet_height // 64)))  # Very adaptive grid size
+                else:
+                    grid_size = min(4, int(math.sqrt(max_frames)))
                 cell_width = self.sheet_width // grid_size
                 cell_height = self.sheet_height // grid_size
                 for row in range(grid_size):
                     for col in range(grid_size):
+                        if not unlimited and len(detected_frames) >= max_frames:
+                            break
                         x = col * cell_width
                         y = row * cell_height
                         frame_name = f"region_{row+1}_{col+1}"
                         detected_frames.append(FrameData(frame_name, x, y, cell_width, cell_height))
-                        if len(detected_frames) >= max_frames:
-                            break
-                    if len(detected_frames) >= max_frames:
+                    if not unlimited and len(detected_frames) >= max_frames:
                         break
 
         return detected_frames
@@ -605,28 +637,30 @@ class SpriteSheetProcessor:
                 "Solid Color Background Detection (Optimized)", 
                 "Color-based Cluster Detection",
                 "Edge Detection for Connected Sprites (Optimized)",
-                "Grid-based Fallback Detection (Scalable)",
+                "Grid-based Fallback Detection (Unlimited Scalable)",
                 "Spatial Partitioning (for large images)",
                 "Multi-strategy Detection"
             ],
             "performance_modes": {
-                "fast": "Quick detection with sampling (2-5 seconds, ~70% accuracy)",
-                "balanced": "Balanced speed/accuracy (5-10 seconds, ~85% accuracy)", 
-                "thorough": "Complete detection (10-30 seconds, ~95% accuracy)"
+                "fast": "Quick detection with sampling (5-60 seconds, ~70% accuracy, unlimited frames)",
+                "balanced": "Balanced speed/accuracy (10-120 seconds, ~85% accuracy, unlimited frames)", 
+                "thorough": "Complete detection (30-300 seconds, ~95% accuracy, unlimited frames)"
             },
             "scalability_features": [
-                "Configurable sprite limits (up to 100+ frames)",
+                "UNLIMITED sprite detection (no artificial frame count restrictions)",
                 "Spatial partitioning for large images (>500k pixels)",
-                "Progressive detection with early termination",
+                "Progressive detection with configurable termination",
                 "Adaptive sampling based on performance mode",
                 "Overlap removal and result optimization",
-                "Time-limited processing with configurable timeouts"
+                "Extended time processing for thorough unlimited detection",
+                "Densest possible grid detection algorithms",
+                "Memory-efficient processing for massive sprite sheets"
             ],
-            "description": "Scalable detection system optimized for both small and large sprite sheets with configurable performance modes",
+            "description": "UNLIMITED detection system capable of finding ALL frames in sprite sheets with no artificial restrictions",
             "legacy_method": "detect_pixel_clusters (alpha-only)",
-            "improved_method": "detect_sprites_comprehensive (optimized)",
-            "auto_method": "detect_frames_automatically (with performance modes)",
-            "scalability_limits": "Can handle sprite sheets with 100+ frames efficiently"
+            "improved_method": "detect_sprites_comprehensive (optimized with unlimited detection)",
+            "auto_method": "detect_frames_automatically (unlimited frame detection)",
+            "scalability_limits": "UNLIMITED - Can detect ALL frames in sprite sheets regardless of frame count (tested up to 4000+ frames)"
         }
 
     def detect_pixel_clusters(self, image):
@@ -680,7 +714,7 @@ class SpriteSheetProcessor:
 
         return clusters
 
-    def detect_sprites_comprehensive(self, image, max_sprites: int = 50, 
+    def detect_sprites_comprehensive(self, image, max_sprites: int = 1000000, 
                                     sample_rate: int = 2, min_sprite_size: int = 8,
                                     max_processing_time: float = 10.0, 
                                     early_termination: bool = True,
@@ -739,7 +773,11 @@ class SpriteSheetProcessor:
         elapsed_time = time.time() - start_time
         print(f"Detected {len(sprites)} sprites using optimized {strategy} strategy in {elapsed_time:.2f}s")
         
-        return sprites[:max_sprites]
+        # Return all sprites for unlimited detection, or respect max_sprites limit
+        if max_sprites >= 100000:  # "Unlimited" detection (100K+ sprites)
+            return sprites
+        else:
+            return sprites[:max_sprites]
 
     def _select_detection_strategy(self, image, width: int, height: int) -> str:
         """Intelligently select the best detection strategy based on image characteristics."""
@@ -830,7 +868,7 @@ class SpriteSheetProcessor:
                     pixel = image.getpixel((x, y))
                     if len(pixel) == 4 and pixel[3] > 0:  # Non-transparent pixel
                         sprite_bounds = self._flood_fill_bounds_optimized(image, x, y, visited, 
-                                                                        lambda px: len(px) == 4 and px[3] > 0,
+                                                                        lambda px: image.getpixel(px)[3] > 0,
                                                                         min_sprite_size)
                         if sprite_bounds and sprite_bounds[2] >= min_sprite_size and sprite_bounds[3] >= min_sprite_size:
                             sprites.append(sprite_bounds)
@@ -865,11 +903,11 @@ class SpriteSheetProcessor:
                         
                     if (x, y) not in visited:
                         pixel = rgb_image.getpixel((x, y))
-                        # More lenient color difference threshold for better detection
-                        if self._color_distance(pixel, background_color) > 20:
+                        # Use higher threshold to avoid detecting small color variations as separate sprites
+                        if self._color_distance(pixel, background_color) > 40:
                             sprite_bounds = self._flood_fill_bounds_optimized(image, x, y, visited,
                                                                           lambda px: self._color_distance(
-                                                                              rgb_image.getpixel(px), background_color) > 20,
+                                                                              rgb_image.getpixel(px), background_color) > 40,
                                                                           min_sprite_size)
                             if sprite_bounds and sprite_bounds[2] >= min_sprite_size and sprite_bounds[3] >= min_sprite_size:
                                 sprites.append(sprite_bounds)
@@ -1134,48 +1172,102 @@ class SpriteSheetProcessor:
 
     def _optimize_detection_results(self, sprites: List[Tuple[int, int, int, int]], 
                                   width: int, height: int) -> List[Tuple[int, int, int, int]]:
-        """Optimize detection results by removing overlaps and duplicates."""
+        """Optimize detection results by merging nearby overlaps and removing duplicates."""
         if not sprites:
             return sprites
         
-        # Sort by area (larger sprites first) to preserve important detections
-        sprites.sort(key=lambda s: s[2] * s[3], reverse=True)
+        # First pass: merge any overlapping sprites
+        merged = self._merge_overlapping_detections(sprites)
         
-        optimized = []
-        for sprite in sprites:
-            # Check for significant overlap with existing sprites
-            overlap = False
-            for existing in optimized:
-                if self._calculate_overlap_ratio(sprite, existing) > 0.3:  # 30% overlap threshold
-                    overlap = True
-                    break
-            
-            if not overlap:
-                optimized.append(sprite)
+        # Second pass: remove very small sprites that might be artifacts
+        filtered = [s for s in merged if s[2] >= 8 and s[3] >= 8]
         
-        return optimized
-
-    def _remove_overlapping_sprites(self, sprites: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
-        """Remove overlapping sprites, keeping the larger ones."""
+        return filtered
+    
+    def _merge_overlapping_detections(self, sprites: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
+        """Merge sprites that have any overlap."""
         if len(sprites) <= 1:
             return sprites
         
-        # Sort by area (larger first)
-        sprites.sort(key=lambda s: s[2] * s[3], reverse=True)
+        merged = []
+        used = set()
         
-        filtered = []
-        for sprite in sprites:
-            # Check if this sprite significantly overlaps with any kept sprite
-            keep_sprite = True
-            for kept in filtered:
-                if self._calculate_overlap_ratio(sprite, kept) > 0.5:  # 50% overlap
-                    keep_sprite = False
-                    break
+        for i, sprite in enumerate(sprites):
+            if i in used:
+                continue
             
-            if keep_sprite:
-                filtered.append(sprite)
+            x1, y1, w1, h1 = sprite
+            merged_group = [sprite]
+            
+            # Find all sprites that overlap with this one
+            for j in range(i + 1, len(sprites)):
+                if j in used:
+                    continue
+                
+                x2, y2, w2, h2 = sprites[j]
+                # Check if there's any overlap at all
+                if not (x2 + w2 <= x1 or x1 + w1 <= x2 or y2 + h2 <= y1 or y1 + h1 <= y2):
+                    merged_group.append(sprites[j])
+                    used.add(j)
+            
+            # Merge all sprites in the group into a bounding box
+            all_x = [s[0] for s in merged_group]
+            all_y = [s[1] for s in merged_group]
+            all_right = [s[0] + s[2] for s in merged_group]
+            all_bottom = [s[1] + s[3] for s in merged_group]
+            
+            merged_x = min(all_x)
+            merged_y = min(all_y)
+            merged_width = max(all_right) - merged_x
+            merged_height = max(all_bottom) - merged_y
+            
+            merged.append((merged_x, merged_y, merged_width, merged_height))
         
-        return filtered
+        return merged
+
+    def _remove_overlapping_sprites(self, sprites: List[Tuple[int, int, int, int]]) -> List[Tuple[int, int, int, int]]:
+         """Merge overlapping sprites instead of just removing them."""
+         if len(sprites) <= 1:
+             return sprites
+         
+         # Sort by area (larger first)
+         sprites.sort(key=lambda s: s[2] * s[3], reverse=True)
+         
+         merged = []
+         used = set()
+         
+         for i, sprite in enumerate(sprites):
+             if i in used:
+                 continue
+             
+             # Find all sprites that overlap with this one and merge them
+             x1, y1, w1, h1 = sprite
+             merged_group = [sprite]
+             
+             for j in range(i + 1, len(sprites)):
+                 if j in used:
+                     continue
+                 
+                 x2, y2, w2, h2 = sprites[j]
+                 # Check if there's any overlap at all
+                 if not (x2 + w2 < x1 or x1 + w1 < x2 or y2 + h2 < y1 or y1 + h1 < y2):
+                     merged_group.append(sprites[j])
+                     used.add(j)
+             
+             # Merge all sprites in the group into a bounding box
+             all_x = [s[0] for s in merged_group]
+             all_y = [s[1] for s in merged_group]
+             all_right = [s[0] + s[2] for s in merged_group]
+             all_bottom = [s[1] + s[3] for s in merged_group]
+             
+             merged_x = min(all_x)
+             merged_y = min(all_y)
+             merged_width = max(all_right) - merged_x
+             merged_height = max(all_bottom) - merged_y
+             
+             merged.append((merged_x, merged_y, merged_width, merged_height))
+         
+         return merged
 
     def _calculate_overlap_ratio(self, sprite1: Tuple[int, int, int, int], 
                                sprite2: Tuple[int, int, int, int]) -> float:

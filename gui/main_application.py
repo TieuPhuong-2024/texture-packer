@@ -616,12 +616,14 @@ class MainApplication(tk.Tk):
 
         # Check for selection of detected boxes
         self.selected_detected_index = None
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
         for i, box in enumerate(self.detected_boxes):
             x = box[0] * self.zoom_level
             y = box[1] * self.zoom_level
             width = box[2] * self.zoom_level
             height = box[3] * self.zoom_level
-            if x <= event.x <= x + width and y <= event.y <= y + height:
+            if x <= canvas_x <= x + width and y <= canvas_y <= y + height:
                 self.selected_detected_index = i
                 self.update_display()
                 return
@@ -772,7 +774,7 @@ class MainApplication(tk.Tk):
 
         # Get performance mode from GUI
         performance_mode = self.performance_mode.get().lower()
-        max_frames = 100 if performance_mode == "thorough" else (20 if performance_mode == "fast" else 50)
+        max_frames = None if performance_mode == "thorough" else (20 if performance_mode == "fast" else 50)
 
         # Update status to show progress
         self.status_bar.config(text=f"Detecting frames in {performance_mode} mode...")

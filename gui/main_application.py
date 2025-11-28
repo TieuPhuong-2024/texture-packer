@@ -5,7 +5,7 @@ Main GUI Application for Sprite Sheet Manager
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
-from PIL import ImageTk
+from PIL import Image, ImageTk
 from src.sprite_sheet_processor import SpriteSheetProcessor, FrameData
 
 
@@ -15,6 +15,9 @@ class MainApplication(tk.Tk):
     def __init__(self):
         super().__init__()
         self.processor = SpriteSheetProcessor()
+        self.zoom_level = 1.0
+        self.min_zoom = 0.1
+        self.max_zoom = 5.0
         self.setup_ui()
         self.setup_menu()
         self.current_frame_name = None
@@ -107,19 +110,32 @@ class MainApplication(tk.Tk):
         viewer_frame.grid_columnconfigure(0, weight=1)
         
         # Frame selection tools
-        selection_frame = ttk.LabelFrame(self.sprite_sheet_frame, text="Frame Selection")
+        selection_frame = ttk.LabelFrame(self.sprite_sheet_frame, text="Frame Selection & Zoom")
         selection_frame.pack(fill=tk.X, padx=10, pady=5)
-        
+
         ttk.Label(selection_frame, text="Frame Name:").grid(row=0, column=0, padx=5, pady=5)
         self.frame_name_entry = ttk.Entry(selection_frame, width=20)
         self.frame_name_entry.grid(row=0, column=1, padx=5, pady=5)
-        
+
         ttk.Button(selection_frame, text="Add Frame", command=self.add_frame_from_selection).grid(row=0, column=2, padx=5, pady=5)
+
+        # Zoom controls
+        ttk.Label(selection_frame, text="Zoom:").grid(row=0, column=3, padx=5, pady=5)
+        ttk.Button(selection_frame, text="−", width=3, command=self.zoom_out).grid(row=0, column=4, padx=2, pady=5)
+        self.zoom_label = ttk.Label(selection_frame, text="100%", width=6)
+        self.zoom_label.grid(row=0, column=5, padx=2, pady=5)
+        ttk.Button(selection_frame, text="+", width=3, command=self.zoom_in).grid(row=0, column=6, padx=2, pady=5)
+        ttk.Button(selection_frame, text="Fit", width=4, command=self.zoom_fit).grid(row=0, column=7, padx=2, pady=5)
         
         # Mouse interaction
         self.canvas.bind("<Button-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+
+        # Mouse wheel zoom
+        self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)  # Windows
+        self.canvas.bind("<Button-4>", self.on_mouse_wheel)    # Linux scroll up
+        self.canvas.bind("<Button-5>", self.on_mouse_wheel)    # Linux scroll down
         
         self.selecting_frame = False
         self.start_x = 0
@@ -297,33 +313,49 @@ class MainApplication(tk.Tk):
     def update_display(self):
         """Update the sprite sheet display."""
         self.canvas.delete("all")
-        
+
         if self.processor.is_loaded():
-            # Convert PIL image to PhotoImage
+            # Scale the image based on zoom level
             pil_image = self.processor.image
-            self.photo_image = ImageTk.PhotoImage(pil_image)
-            
+            if self.zoom_level != 1.0:
+                new_width = int(pil_image.width * self.zoom_level)
+                new_height = int(pil_image.height * self.zoom_level)
+                scaled_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            else:
+                scaled_image = pil_image
+
+            # Convert PIL image to PhotoImage
+            self.photo_image = ImageTk.PhotoImage(scaled_image)
+
             # Display image on canvas
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo_image)
-            self.canvas.config(scrollregion=(0, 0, pil_image.width, pil_image.height))
-            
+            self.canvas.config(scrollregion=(0, 0, scaled_image.width, scaled_image.height))
+
             # Draw frame boundaries
             self.draw_frame_boundaries()
             
     def draw_frame_boundaries(self):
         """Draw boundaries for all frames."""
         for frame in self.processor.frames:
+            # Scale frame coordinates by zoom level
+            x = frame.x * self.zoom_level
+            y = frame.y * self.zoom_level
+            width = frame.width * self.zoom_level
+            height = frame.height * self.zoom_level
+
             self.canvas.create_rectangle(
-                frame.x, frame.y, 
-                frame.x + frame.width, frame.y + frame.height,
-                outline="red", width=2
+                x, y,
+                x + width, y + height,
+                outline="red", width=max(1, int(2 * self.zoom_level))
             )
-            # Add frame name label
-            self.canvas.create_text(
-                frame.x + 5, frame.y + 15,
-                text=frame.name, fill="white",
-                anchor=tk.W, font=("Arial", 8)
-            )
+            # Add frame name label (only if zoom level is high enough to be readable)
+            if self.zoom_level > 0.3:
+                font_size = max(6, int(8 * self.zoom_level))
+                self.canvas.create_text(
+                    x + 5, y + 15,
+                    text=frame.name, fill="white",
+                    anchor=tk.W, font=("Arial", font_size)
+                )
     
     def update_frame_list(self):
         """Update the frame list display."""
@@ -466,21 +498,22 @@ class MainApplication(tk.Tk):
         if not hasattr(self, 'selection_rect') or self.selection_rect is None:
             messagebox.showwarning("Warning", "Please select an area on the sprite sheet first")
             return
-        
+
         name = self.frame_name_entry.get().strip()
         if not name:
             messagebox.showwarning("Warning", "Please enter a frame name")
             return
-        
-        # Get coordinates from the selection
+
+        # Get coordinates from the selection (these are in canvas/zoomed space)
         coords = self.canvas.coords(self.selection_rect)
         if len(coords) == 4:
             x1, y1, x2, y2 = coords
-            x = int(x1)
-            y = int(y1)
-            width = int(x2 - x1)
-            height = int(y2 - y1)
-            
+            # Convert from canvas coordinates back to image coordinates
+            x = int(x1 / self.zoom_level)
+            y = int(y1 / self.zoom_level)
+            width = int((x2 - x1) / self.zoom_level)
+            height = int((y2 - y1) / self.zoom_level)
+
             if self.processor.add_frame(name, x, y, width, height):
                 self.update_frame_list()
                 self.update_display()
@@ -526,6 +559,17 @@ class MainApplication(tk.Tk):
     def on_canvas_release(self, event):
         """Handle canvas mouse release for frame selection."""
         self.selecting_frame = False
+
+    def on_mouse_wheel(self, event):
+        """Handle mouse wheel zoom."""
+        if not self.processor.is_loaded():
+            return
+
+        # Determine zoom direction
+        if event.num == 4 or event.delta > 0:  # Scroll up
+            self.zoom_in()
+        elif event.num == 5 or event.delta < 0:  # Scroll down
+            self.zoom_out()
     
     def on_frame_select(self, event):
         """Handle frame selection in the treeview."""
@@ -592,6 +636,38 @@ class MainApplication(tk.Tk):
         self.edit_y_entry.delete(0, tk.END)
         self.edit_width_entry.delete(0, tk.END)
         self.edit_height_entry.delete(0, tk.END)
+
+    def zoom_in(self):
+        """Zoom in the sprite sheet view."""
+        if self.zoom_level < self.max_zoom:
+            self.zoom_level = min(self.zoom_level * 1.2, self.max_zoom)
+            self.update_display()
+            self.update_zoom_label()
+
+    def zoom_out(self):
+        """Zoom out the sprite sheet view."""
+        if self.zoom_level > self.min_zoom:
+            self.zoom_level = max(self.zoom_level / 1.2, self.min_zoom)
+            self.update_display()
+            self.update_zoom_label()
+
+    def zoom_fit(self):
+        """Fit the sprite sheet to the canvas view."""
+        if self.processor.is_loaded():
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:  # Canvas must be visible
+                scale_x = canvas_width / self.processor.sheet_width
+                scale_y = canvas_height / self.processor.sheet_height
+                self.zoom_level = min(scale_x, scale_y) * 0.9  # 90% to leave some margin
+                self.zoom_level = max(self.min_zoom, min(self.zoom_level, self.max_zoom))
+                self.update_display()
+                self.update_zoom_label()
+
+    def update_zoom_label(self):
+        """Update the zoom level display."""
+        self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
 
 
 if __name__ == "__main__":

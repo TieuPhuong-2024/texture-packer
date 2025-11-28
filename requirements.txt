@@ -1,0 +1,15 @@
+# Sprite Sheet Manager Requirements
+# Core dependencies for the sprite sheet management application
+
+# Image processing library
+Pillow>=10.0.0
+
+# GUI framework (usually included with Python)
+# tkinter - built-in with Python
+
+# Data handling (built-in modules)
+# json - built-in
+# csv - built-in
+# os - built-in
+# pathlib - built-in
+# typing - built-in

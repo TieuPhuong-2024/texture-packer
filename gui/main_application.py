@@ -356,7 +356,7 @@ class MainApplication(tk.Tk):
             self.canvas.create_rectangle(
                 x, y,
                 x + width, y + height,
-                dash=(5,5), fill='', outline=outline_color, width=width_line, tag='detected_frame'
+                dash=(5,5), fill='', outline=outline_color, width=width_line, tag=f'detected_frame_{i}'
             )
 
         # Draw existing frames in red
@@ -526,14 +526,18 @@ class MainApplication(tk.Tk):
             x, y, w, h = box
             name = self.frame_name_entry.get().strip()
             if name:
-                self.processor.add_frame(name, x, y, w, h)
-                self.update_frame_list()
-                self.update_display()
-                self.update_export_preview()
-                self.frame_name_entry.delete(0, tk.END)
-                del self.detected_boxes[self.selected_detected_index]
-                self.selected_detected_index = None
-                self.status_bar.config(text=f"Frame '{name}' added successfully")
+                if self.processor.add_frame(name, x, y, w, h):
+                    self.update_frame_list()
+                    self.update_display()
+                    self.update_export_preview()
+                    self.frame_name_entry.delete(0, tk.END)
+                    del self.detected_boxes[self.selected_detected_index]
+                    self.selected_detected_index = None
+                    self.status_bar.config(text=f"Frame '{name}' added successfully")
+                else:
+                    messagebox.showerror("Error", "Failed to add frame. Check if name exists or frame is out of bounds.")
+            else:
+                messagebox.showwarning("Warning", "Please enter a frame name")
             return
 
         if not hasattr(self, 'selection_rect') or self.selection_rect is None:
@@ -566,6 +570,8 @@ class MainApplication(tk.Tk):
                 self.status_bar.config(text=f"Frame '{name}' added successfully")
             else:
                 messagebox.showerror("Error", "Failed to add frame. Check if name exists or frame is out of bounds.")
+        else:
+            messagebox.showerror("Error", "Invalid selection rectangle")
     
     def on_canvas_click(self, event):
         """Handle canvas mouse click for frame selection."""
@@ -577,13 +583,18 @@ class MainApplication(tk.Tk):
         for item in clicked_items:
             tags = self.canvas.gettags(item)
             for tag in tags:
-                if tag.startswith("detected_frame_"):
+                if tag.startswith("detected_frame"):
                     # Extract frame index from tag
                     try:
-                        frame_index = int(tag.split("_")[-1])
-                        if 0 <= frame_index < len(self.detected_frames):
-                            self.prompt_add_detected_frame(frame_index)
-                            return  # Don't start manual selection
+                        # Handle both "detected_frame" and "detected_frame_0" formats
+                        if tag == "detected_frame":
+                            continue  # Skip the general tag
+                        parts = tag.split("_")
+                        if len(parts) >= 3:
+                            frame_index = int(parts[2])
+                            if 0 <= frame_index < len(self.detected_boxes):
+                                self.prompt_add_detected_frame(frame_index)
+                                return  # Don't start manual selection
                     except (ValueError, IndexError):
                         pass
 
@@ -597,6 +608,7 @@ class MainApplication(tk.Tk):
         self.selection_rect = None
 
         # Check for selection of detected boxes
+        self.selected_detected_index = None
         for i, box in enumerate(self.detected_boxes):
             x = box[0] * self.zoom_level
             y = box[1] * self.zoom_level
@@ -606,8 +618,7 @@ class MainApplication(tk.Tk):
                 self.selected_detected_index = i
                 self.update_display()
                 return
-        # No match
-        self.selected_detected_index = None
+        # No match found, just update display to remove selection
         self.update_display()
     
     def on_canvas_drag(self, event):
@@ -747,12 +758,16 @@ class MainApplication(tk.Tk):
             messagebox.showwarning("Warning", "No sprite sheet loaded")
             return
 
+        # Clear any existing detected frames first
+        self.detected_boxes = []
+        self.detected_frames = []
+        self.selected_detected_index = None
+
         # Detect frames automatically using the comprehensive detection system
         self.detected_boxes = self.processor.detect_sprites_comprehensive(self.processor.image, max_sprites=50)
 
         if not self.detected_boxes:
             # Fallback to traditional automatic frame detection
-            self.detected_boxes = []
             auto_frames = self.processor.detect_frames_automatically(max_frames=20)
             for frame in auto_frames:
                 self.detected_boxes.append((frame.x, frame.y, frame.width, frame.height))
@@ -767,22 +782,25 @@ class MainApplication(tk.Tk):
 
     def clear_detected_frames(self):
         """Clear all detected frames."""
+        self.detected_boxes = []
         self.detected_frames = []
+        self.selected_detected_index = None
         self.update_display()
         self.status_bar.config(text="Cleared detected frames")
 
     def prompt_add_detected_frame(self, frame_index):
         """Prompt for name and add a detected frame."""
-        if frame_index >= len(self.detected_frames):
+        if frame_index >= len(self.detected_boxes):
             return
 
-        detected_frame = self.detected_frames[frame_index]
+        detected_box = self.detected_boxes[frame_index]
+        x, y, width, height = detected_box
 
         # Create a simple dialog to get frame name
         from tkinter import simpledialog
         frame_name = simpledialog.askstring(
             "Add Frame",
-            f"Enter name for frame ({detected_frame.width}x{detected_frame.height}):",
+            f"Enter name for frame ({width}x{height}):",
             initialvalue=f"frame_{len(self.processor.frames)}"
         )
 
@@ -795,10 +813,10 @@ class MainApplication(tk.Tk):
                     return
 
             # Add the frame
-            if self.processor.add_frame(frame_name, detected_frame.x, detected_frame.y,
-                                      detected_frame.width, detected_frame.height):
-                # Remove from detected frames
-                self.detected_frames.pop(frame_index)
+            if self.processor.add_frame(frame_name, x, y, width, height):
+                # Remove from detected boxes
+                self.detected_boxes.pop(frame_index)
+                self.selected_detected_index = None
 
                 # Update UI
                 self.update_frame_list()

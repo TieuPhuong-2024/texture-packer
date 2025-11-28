@@ -197,6 +197,7 @@ class MainApplication(tk.Tk):
         
         ttk.Button(export_control_frame, text="Export to JSON", command=self.export_to_json).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(export_control_frame, text="Export to CSV", command=self.export_to_csv).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(export_control_frame, text="Export to XML", command=self.export_to_xml).pack(side=tk.LEFT, padx=5, pady=5)
         
         # Preview frame
         preview_frame = ttk.LabelFrame(self.export_frame, text="Preview")
@@ -362,6 +363,33 @@ class MainApplication(tk.Tk):
         self.preview_text.insert(tk.END, "Frame Name,X,Y,Width,Height\n")
         for frame in self.processor.frames:
             self.preview_text.insert(tk.END, f"{frame.name},{frame.x},{frame.y},{frame.width},{frame.height}\n")
+
+        # Show XML preview
+        self.preview_text.insert(tk.END, "\n\nXML Format Preview:\n\n")
+        import xml.etree.ElementTree as ET
+        from xml.dom import minidom
+
+        # Create XML structure for preview
+        root = ET.Element("sprite_sheet_data")
+        ET.SubElement(root, "sprite_sheet").text = self.processor.original_filename
+        ET.SubElement(root, "sheet_width").text = str(self.processor.sheet_width)
+        ET.SubElement(root, "sheet_height").text = str(self.processor.sheet_height)
+        ET.SubElement(root, "total_frames").text = str(len(self.processor.frames))
+
+        frames_element = ET.SubElement(root, "frames")
+        for frame in self.processor.frames:
+            frame_element = ET.SubElement(frames_element, "frame")
+            ET.SubElement(frame_element, "name").text = frame.name
+            ET.SubElement(frame_element, "x").text = str(frame.x)
+            ET.SubElement(frame_element, "y").text = str(frame.y)
+            ET.SubElement(frame_element, "width").text = str(frame.width)
+            ET.SubElement(frame_element, "height").text = str(frame.height)
+
+        # Pretty print XML for preview
+        rough_string = ET.tostring(root, encoding='unicode')
+        reparsed = minidom.parseString(rough_string)
+        xml_preview = reparsed.toprettyxml(indent="  ")
+        self.preview_text.insert(tk.END, xml_preview)
     
     def export_to_json(self):
         """Export frame data to JSON file."""
@@ -387,19 +415,38 @@ class MainApplication(tk.Tk):
         if not self.processor.frames:
             messagebox.showwarning("Warning", "No frames to export")
             return
-            
+
         file_path = filedialog.asksaveasfilename(
             title="Export to CSV",
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
-        
+
         if file_path:
             if self.processor.export_to_csv(file_path):
                 self.status_bar.config(text=f"Exported to CSV: {os.path.basename(file_path)}")
                 messagebox.showinfo("Success", "Frame data exported successfully!")
             else:
                 messagebox.showerror("Error", "Failed to export to CSV")
+
+    def export_to_xml(self):
+        """Export frame data to XML file."""
+        if not self.processor.frames:
+            messagebox.showwarning("Warning", "No frames to export")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Export to XML",
+            defaultextension=".xml",
+            filetypes=[("XML files", "*.xml"), ("All files", "*.*")]
+        )
+
+        if file_path:
+            if self.processor.export_to_xml(file_path):
+                self.status_bar.config(text=f"Exported to XML: {os.path.basename(file_path)}")
+                messagebox.showinfo("Success", "Frame data exported successfully!")
+            else:
+                messagebox.showerror("Error", "Failed to export to XML")
     
     def add_frame_from_selection(self):
         """Add a frame from the selected rectangle."""

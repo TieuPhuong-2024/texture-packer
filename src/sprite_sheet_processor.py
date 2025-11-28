@@ -5,6 +5,7 @@ Core functionality for managing sprite sheets, frames, and data export.
 
 import json
 import csv
+import xml.etree.ElementTree as ET
 import os
 from PIL import Image, ImageDraw, ImageTk
 from typing import List, Dict, Tuple, Optional
@@ -228,10 +229,10 @@ class SpriteSheetProcessor:
     def export_to_csv(self, file_path: str) -> bool:
         """
         Export frame data to CSV file.
-        
+
         Args:
             file_path: Path to save the CSV file
-            
+
         Returns:
             bool: True if exported successfully, False otherwise
         """
@@ -240,14 +241,53 @@ class SpriteSheetProcessor:
                 writer = csv.writer(f)
                 # Write header
                 writer.writerow(['Frame Name', 'X', 'Y', 'Width', 'Height'])
-                
+
                 # Write frame data
                 for frame in self.frames:
-                    writer.writerow([frame.name, frame.x, frame.y, 
-                                   frame.width, frame.height])
+                    writer.writerow([frame.name, frame.x, frame.y,
+                                    frame.width, frame.height])
             return True
         except Exception as e:
             print(f"Error exporting to CSV: {e}")
+            return False
+
+    def export_to_xml(self, file_path: str) -> bool:
+        """
+        Export frame data to XML file.
+
+        Args:
+            file_path: Path to save the XML file
+
+        Returns:
+            bool: True if exported successfully, False otherwise
+        """
+        try:
+            # Create root element
+            root = ET.Element("sprite_sheet_data")
+
+            # Add sprite sheet metadata
+            ET.SubElement(root, "sprite_sheet").text = self.original_filename
+            ET.SubElement(root, "sheet_width").text = str(self.sheet_width)
+            ET.SubElement(root, "sheet_height").text = str(self.sheet_height)
+            ET.SubElement(root, "total_frames").text = str(len(self.frames))
+
+            # Add frames
+            frames_element = ET.SubElement(root, "frames")
+            for frame in self.frames:
+                frame_element = ET.SubElement(frames_element, "frame")
+                ET.SubElement(frame_element, "name").text = frame.name
+                ET.SubElement(frame_element, "x").text = str(frame.x)
+                ET.SubElement(frame_element, "y").text = str(frame.y)
+                ET.SubElement(frame_element, "width").text = str(frame.width)
+                ET.SubElement(frame_element, "height").text = str(frame.height)
+
+            # Write to file with pretty formatting
+            tree = ET.ElementTree(root)
+            ET.indent(tree, space="  ", level=0)
+            tree.write(file_path, encoding='utf-8', xml_declaration=True)
+            return True
+        except Exception as e:
+            print(f"Error exporting to XML: {e}")
             return False
     
     def load_from_json(self, file_path: str) -> bool:

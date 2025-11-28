@@ -412,3 +412,139 @@ class SpriteSheetProcessor:
     def is_loaded(self) -> bool:
         """Check if a sprite sheet is loaded."""
         return self.image is not None
+
+    def detect_frames_automatically(self, max_frames: int = 20) -> List[FrameData]:
+        """
+        Automatically detect potential sprite frames in the sprite sheet.
+        Similar to Texture Packer's sprite extraction - creates selectable frame boundaries.
+
+        Args:
+            max_frames: Maximum number of frames to suggest (to avoid UI clutter)
+
+        Returns:
+            List of detected FrameData objects that can be selected
+        """
+        if self.image is None:
+            return []
+
+        detected_frames = []
+
+        # Try to detect frames based on common sprite sheet patterns
+        # Strategy: Look for regular grid patterns and common sprite sizes
+
+        # Common sprite sizes to try (from largest to smallest)
+        common_sizes = [
+            (64, 64), (32, 32), (48, 48), (96, 96), (128, 128),
+            (64, 32), (32, 64), (64, 128), (128, 64), (32, 48), (48, 32)
+        ]
+
+        for width, height in common_sizes:
+            if len(detected_frames) >= max_frames:
+                break
+
+            # Skip sizes that don't fit
+            if width > self.sheet_width or height > self.sheet_height:
+                continue
+
+            # Calculate grid dimensions
+            cols = self.sheet_width // width
+            rows = self.sheet_height // height
+
+            # Only consider reasonable grids (at least 2x2, but not too many)
+            if cols >= 2 and rows >= 2 and cols * rows <= 16:  # Limit to avoid too many frames
+                for row in range(min(rows, 4)):  # Limit rows to avoid clutter
+                    for col in range(min(cols, 4)):  # Limit cols to avoid clutter
+                        if len(detected_frames) >= max_frames:
+                            break
+
+                        x = col * width
+                        y = row * height
+
+                        # Check if this area conflicts with existing frames
+                        conflict = False
+                        for existing_frame in self.frames:
+                            # Check for significant overlap (>50% area)
+                            overlap_x = max(0, min(x + width, existing_frame.x + existing_frame.width) - max(x, existing_frame.x))
+                            overlap_y = max(0, min(y + height, existing_frame.y + existing_frame.height) - max(y, existing_frame.y))
+                            overlap_area = overlap_x * overlap_y
+                            existing_area = existing_frame.width * existing_frame.height
+                            if overlap_area > existing_area * 0.5:  # More than 50% overlap
+                                conflict = True
+                                break
+
+                        if not conflict:
+                            frame_name = f"sprite_{width}x{height}_{row+1}_{col+1}"
+                            detected_frames.append(FrameData(frame_name, x, y, width, height))
+
+        # If no frames detected with the grid approach, try a simpler approach
+        if not detected_frames:
+            # Try to create frames based on dividing the sheet into equal parts
+            for i in range(min(4, max_frames)):  # Up to 4 frames
+                if self.sheet_width > self.sheet_height:
+                    # Wide sheet - divide horizontally
+                    width = self.sheet_width // 4
+                    height = self.sheet_height
+                    x = i * width
+                    y = 0
+                else:
+                    # Tall sheet - divide vertically
+                    width = self.sheet_width
+                    height = self.sheet_height // 4
+                    x = 0
+                    y = i * height
+
+                # Check bounds
+                if x + width <= self.sheet_width and y + height <= self.sheet_height:
+                    frame_name = f"region_{i+1}"
+                    detected_frames.append(FrameData(frame_name, x, y, width, height))
+
+        return detected_frames
+
+    def detect_pixel_clusters(self, image):
+        """
+        Detect pixel clusters in the image using flood fill algorithm.
+
+        Args:
+            image: PIL Image object (assumed RGBA)
+
+        Returns:
+            List of tuples (x, y, w, h) for each non-transparent pixel cluster
+        """
+        if image is None:
+            return []
+
+        image = image.convert('RGBA')
+
+        width, height = image.size
+        visited = set()
+        clusters = []
+
+        for y in range(height):
+            for x in range(width):
+                if (x, y) not in visited:
+                    pixel = image.getpixel((x, y))
+                    if image.mode == 'RGBA' and len(pixel) == 4 and pixel[3] > 0:
+                        # Start flood fill for this cluster
+                        min_x, min_y = x, y
+                        max_x, max_y = x, y
+                        stack = [(x, y)]
+                        visited.add((x, y))
+                        while stack:
+                            cx, cy = stack.pop()
+                            # Update bounding box
+                            min_x = min(min_x, cx)
+                            min_y = min(min_y, cy)
+                            max_x = max(max_x, cx)
+                            max_y = max(max_y, cy)
+                            # Check 4-connected neighbors
+                            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                nx, ny = cx + dx, cy + dy
+                                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
+                                    npixel = image.getpixel((nx, ny))
+                                    if len(npixel) == 4 and npixel[3] > 0:
+                                        visited.add((nx, ny))
+                                        stack.append((nx, ny))
+                        # Add cluster bounding box
+                        clusters.append((min_x, min_y, max_x - min_x, max_y - min_y))
+
+        return clusters

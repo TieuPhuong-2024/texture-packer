@@ -18,6 +18,9 @@ class MainApplication(tk.Tk):
         self.zoom_level = 1.0
         self.min_zoom = 0.1
         self.max_zoom = 5.0
+        self.detected_frames = []  # Store automatically detected frames
+        self.detected_boxes = []
+        self.selected_detected_index = None
         self.setup_ui()
         self.setup_menu()
         self.current_frame_name = None
@@ -118,14 +121,16 @@ class MainApplication(tk.Tk):
         self.frame_name_entry.grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Button(selection_frame, text="Add Frame", command=self.add_frame_from_selection).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(selection_frame, text="Auto Detect", command=self.auto_detect_frames).grid(row=0, column=3, padx=5, pady=5)
+        ttk.Button(selection_frame, text="Clear Detected", command=self.clear_detected_frames).grid(row=0, column=4, padx=5, pady=5)
 
-        # Zoom controls
-        ttk.Label(selection_frame, text="Zoom:").grid(row=0, column=3, padx=5, pady=5)
-        ttk.Button(selection_frame, text="−", width=3, command=self.zoom_out).grid(row=0, column=4, padx=2, pady=5)
+        # Zoom controls on row 1
+        ttk.Label(selection_frame, text="Zoom:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        ttk.Button(selection_frame, text="−", width=3, command=self.zoom_out).grid(row=1, column=1, padx=2, pady=5)
         self.zoom_label = ttk.Label(selection_frame, text="100%", width=6)
-        self.zoom_label.grid(row=0, column=5, padx=2, pady=5)
-        ttk.Button(selection_frame, text="+", width=3, command=self.zoom_in).grid(row=0, column=6, padx=2, pady=5)
-        ttk.Button(selection_frame, text="Fit", width=4, command=self.zoom_fit).grid(row=0, column=7, padx=2, pady=5)
+        self.zoom_label.grid(row=1, column=2, padx=2, pady=5)
+        ttk.Button(selection_frame, text="+", width=3, command=self.zoom_in).grid(row=1, column=3, padx=2, pady=5)
+        ttk.Button(selection_frame, text="Fit", width=4, command=self.zoom_fit).grid(row=1, column=4, padx=2, pady=5)
         
         # Mouse interaction
         self.canvas.bind("<Button-1>", self.on_canvas_click)
@@ -312,6 +317,7 @@ class MainApplication(tk.Tk):
     
     def update_display(self):
         """Update the sprite sheet display."""
+        # Clear all canvas items completely before redrawing
         self.canvas.delete("all")
 
         if self.processor.is_loaded():
@@ -327,8 +333,8 @@ class MainApplication(tk.Tk):
             # Convert PIL image to PhotoImage
             self.photo_image = ImageTk.PhotoImage(scaled_image)
 
-            # Display image on canvas
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo_image)
+            # Display image on canvas with tag
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo_image, tags="image")
             self.canvas.config(scrollregion=(0, 0, scaled_image.width, scaled_image.height))
 
             # Draw frame boundaries
@@ -336,6 +342,24 @@ class MainApplication(tk.Tk):
             
     def draw_frame_boundaries(self):
         """Draw boundaries for all frames."""
+        # Draw detected boxes
+        for i, box in enumerate(self.detected_boxes):
+            # Scale box coordinates by zoom level
+            x = box[0] * self.zoom_level
+            y = box[1] * self.zoom_level
+            width = box[2] * self.zoom_level
+            height = box[3] * self.zoom_level
+
+            outline_color = 'red' if i == self.selected_detected_index else 'green'
+            width_line = 3 if i == self.selected_detected_index else 2
+
+            self.canvas.create_rectangle(
+                x, y,
+                x + width, y + height,
+                dash=(5,5), fill='', outline=outline_color, width=width_line, tag='detected_frame'
+            )
+
+        # Draw existing frames in red
         for frame in self.processor.frames:
             # Scale frame coordinates by zoom level
             x = frame.x * self.zoom_level
@@ -346,7 +370,8 @@ class MainApplication(tk.Tk):
             self.canvas.create_rectangle(
                 x, y,
                 x + width, y + height,
-                outline="red", width=max(1, int(2 * self.zoom_level))
+                outline="red", width=max(1, int(2 * self.zoom_level)),
+                tags="frame_boundary"
             )
             # Add frame name label (only if zoom level is high enough to be readable)
             if self.zoom_level > 0.3:
@@ -354,7 +379,8 @@ class MainApplication(tk.Tk):
                 self.canvas.create_text(
                     x + 5, y + 15,
                     text=frame.name, fill="white",
-                    anchor=tk.W, font=("Arial", font_size)
+                    anchor=tk.W, font=("Arial", font_size),
+                    tags="frame_label"
                 )
     
     def update_frame_list(self):
@@ -495,6 +521,21 @@ class MainApplication(tk.Tk):
     
     def add_frame_from_selection(self):
         """Add a frame from the selected rectangle."""
+        if self.selected_detected_index is not None:
+            box = self.detected_boxes[self.selected_detected_index]
+            x, y, w, h = box
+            name = self.frame_name_entry.get().strip()
+            if name:
+                self.processor.add_frame(name, x, y, w, h)
+                self.update_frame_list()
+                self.update_display()
+                self.update_export_preview()
+                self.frame_name_entry.delete(0, tk.END)
+                del self.detected_boxes[self.selected_detected_index]
+                self.selected_detected_index = None
+                self.status_bar.config(text=f"Frame '{name}' added successfully")
+            return
+
         if not hasattr(self, 'selection_rect') or self.selection_rect is None:
             messagebox.showwarning("Warning", "Please select an area on the sprite sheet first")
             return
@@ -519,6 +560,9 @@ class MainApplication(tk.Tk):
                 self.update_display()
                 self.update_export_preview()
                 self.frame_name_entry.delete(0, tk.END)
+                # Clear selection rectangle
+                self.canvas.delete("selection_rect")
+                self.selection_rect = None
                 self.status_bar.config(text=f"Frame '{name}' added successfully")
             else:
                 messagebox.showerror("Error", "Failed to add frame. Check if name exists or frame is out of bounds.")
@@ -527,16 +571,44 @@ class MainApplication(tk.Tk):
         """Handle canvas mouse click for frame selection."""
         if not self.processor.is_loaded():
             return
-        
+
+        # Check if clicked on a detected frame
+        clicked_items = self.canvas.find_overlapping(event.x-1, event.y-1, event.x+1, event.y+1)
+        for item in clicked_items:
+            tags = self.canvas.gettags(item)
+            for tag in tags:
+                if tag.startswith("detected_frame_"):
+                    # Extract frame index from tag
+                    try:
+                        frame_index = int(tag.split("_")[-1])
+                        if 0 <= frame_index < len(self.detected_frames):
+                            self.prompt_add_detected_frame(frame_index)
+                            return  # Don't start manual selection
+                    except (ValueError, IndexError):
+                        pass
+
+        # If not clicked on detected frame, start manual selection
         self.start_x = self.canvas.canvasx(event.x)
         self.start_y = self.canvas.canvasy(event.y)
         self.selecting_frame = True
-        
+
         # Remove previous selection
-        if hasattr(self, 'selection_rect') and self.selection_rect:
-            self.canvas.delete(self.selection_rect)
-        
+        self.canvas.delete("selection_rect")
         self.selection_rect = None
+
+        # Check for selection of detected boxes
+        for i, box in enumerate(self.detected_boxes):
+            x = box[0] * self.zoom_level
+            y = box[1] * self.zoom_level
+            width = box[2] * self.zoom_level
+            height = box[3] * self.zoom_level
+            if x <= event.x <= x + width and y <= event.y <= y + height:
+                self.selected_detected_index = i
+                self.update_display()
+                return
+        # No match
+        self.selected_detected_index = None
+        self.update_display()
     
     def on_canvas_drag(self, event):
         """Handle canvas mouse drag for frame selection."""
@@ -553,7 +625,7 @@ class MainApplication(tk.Tk):
         # Draw new rectangle
         self.selection_rect = self.canvas.create_rectangle(
             self.start_x, self.start_y, current_x, current_y,
-            outline="blue", width=2, dash=(5, 5)
+            outline="blue", width=2, dash=(5, 5), tags="selection_rect"
         )
     
     def on_canvas_release(self, event):
@@ -668,6 +740,66 @@ class MainApplication(tk.Tk):
     def update_zoom_label(self):
         """Update the zoom level display."""
         self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
+
+    def auto_detect_frames(self):
+        """Automatically detect potential frames in the sprite sheet."""
+        if not self.processor.is_loaded():
+            messagebox.showwarning("Warning", "No sprite sheet loaded")
+            return
+
+        # Detect frames automatically
+        self.detected_boxes = self.processor.detect_pixel_clusters(self.processor.image) if self.processor.image is not None else []
+
+        if not self.detected_boxes:
+            messagebox.showinfo("Info", "No potential frames detected. Try different frame sizes or check if frames already exist.")
+            return
+
+        # Update display to show detected frames
+        self.update_display()
+        self.status_bar.config(text=f"Detected {len(self.detected_boxes)} potential frames. Click on them to add.")
+
+    def clear_detected_frames(self):
+        """Clear all detected frames."""
+        self.detected_frames = []
+        self.update_display()
+        self.status_bar.config(text="Cleared detected frames")
+
+    def prompt_add_detected_frame(self, frame_index):
+        """Prompt for name and add a detected frame."""
+        if frame_index >= len(self.detected_frames):
+            return
+
+        detected_frame = self.detected_frames[frame_index]
+
+        # Create a simple dialog to get frame name
+        from tkinter import simpledialog
+        frame_name = simpledialog.askstring(
+            "Add Frame",
+            f"Enter name for frame ({detected_frame.width}x{detected_frame.height}):",
+            initialvalue=f"frame_{len(self.processor.frames)}"
+        )
+
+        if frame_name and frame_name.strip():
+            frame_name = frame_name.strip()
+            # Check if name already exists
+            for existing_frame in self.processor.frames:
+                if existing_frame.name == frame_name:
+                    messagebox.showerror("Error", f"Frame name '{frame_name}' already exists!")
+                    return
+
+            # Add the frame
+            if self.processor.add_frame(frame_name, detected_frame.x, detected_frame.y,
+                                      detected_frame.width, detected_frame.height):
+                # Remove from detected frames
+                self.detected_frames.pop(frame_index)
+
+                # Update UI
+                self.update_frame_list()
+                self.update_display()
+                self.update_export_preview()
+                self.status_bar.config(text=f"Frame '{frame_name}' added successfully")
+            else:
+                messagebox.showerror("Error", "Failed to add frame")
 
 
 if __name__ == "__main__":

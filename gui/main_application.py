@@ -121,8 +121,15 @@ class MainApplication(tk.Tk):
         self.frame_name_entry.grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Button(selection_frame, text="Add Frame", command=self.add_frame_from_selection).grid(row=0, column=2, padx=5, pady=5)
-        ttk.Button(selection_frame, text="Auto Detect", command=self.auto_detect_frames).grid(row=0, column=3, padx=5, pady=5)
-        ttk.Button(selection_frame, text="Clear Detected", command=self.clear_detected_frames).grid(row=0, column=4, padx=5, pady=5)
+        
+        # Performance mode selection
+        ttk.Label(selection_frame, text="Performance:").grid(row=0, column=3, padx=(20,5), pady=5)
+        self.performance_mode = ttk.Combobox(selection_frame, values=["Fast", "Balanced", "Thorough"], width=10, state="readonly")
+        self.performance_mode.set("Balanced")
+        self.performance_mode.grid(row=0, column=4, padx=5, pady=5)
+        
+        ttk.Button(selection_frame, text="Auto Detect", command=self.auto_detect_frames).grid(row=0, column=5, padx=5, pady=5)
+        ttk.Button(selection_frame, text="Clear Detected", command=self.clear_detected_frames).grid(row=0, column=6, padx=5, pady=5)
 
         # Zoom controls on row 1
         ttk.Label(selection_frame, text="Zoom:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
@@ -763,22 +770,29 @@ class MainApplication(tk.Tk):
         self.detected_frames = []
         self.selected_detected_index = None
 
-        # Detect frames automatically using the comprehensive detection system
-        self.detected_boxes = self.processor.detect_sprites_comprehensive(self.processor.image, max_sprites=50)
+        # Get performance mode from GUI
+        performance_mode = self.performance_mode.get().lower()
+        max_frames = 100 if performance_mode == "thorough" else (20 if performance_mode == "fast" else 50)
 
-        if not self.detected_boxes:
-            # Fallback to traditional automatic frame detection
-            auto_frames = self.processor.detect_frames_automatically(max_frames=20)
-            for frame in auto_frames:
-                self.detected_boxes.append((frame.x, frame.y, frame.width, frame.height))
+        # Update status to show progress
+        self.status_bar.config(text=f"Detecting frames in {performance_mode} mode...")
+        self.update()
+
+        # Detect frames automatically using the improved comprehensive detection system
+        auto_frames = self.processor.detect_frames_automatically(max_frames=max_frames, performance_mode=performance_mode)
+        
+        # Convert detected frames to boxes for display
+        for frame in auto_frames:
+            self.detected_boxes.append((frame.x, frame.y, frame.width, frame.height))
 
         if not self.detected_boxes:
             messagebox.showinfo("Info", "No potential frames detected. Try different frame sizes or check if frames already exist.")
+            self.status_bar.config(text="No frames detected")
             return
 
         # Update display to show detected frames
         self.update_display()
-        self.status_bar.config(text=f"Detected {len(self.detected_boxes)} potential frames using comprehensive detection. Click on them to add.")
+        self.status_bar.config(text=f"Detected {len(self.detected_boxes)} potential frames in {performance_mode} mode. Click on them to add.")
 
     def clear_detected_frames(self):
         """Clear all detected frames."""

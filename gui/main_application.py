@@ -747,8 +747,15 @@ class MainApplication(tk.Tk):
             messagebox.showwarning("Warning", "No sprite sheet loaded")
             return
 
-        # Detect frames automatically
-        self.detected_boxes = self.processor.detect_pixel_clusters(self.processor.image) if self.processor.image is not None else []
+        # Detect frames automatically using the comprehensive detection system
+        self.detected_boxes = self.processor.detect_sprites_comprehensive(self.processor.image, max_sprites=50)
+
+        if not self.detected_boxes:
+            # Fallback to traditional automatic frame detection
+            self.detected_boxes = []
+            auto_frames = self.processor.detect_frames_automatically(max_frames=20)
+            for frame in auto_frames:
+                self.detected_boxes.append((frame.x, frame.y, frame.width, frame.height))
 
         if not self.detected_boxes:
             messagebox.showinfo("Info", "No potential frames detected. Try different frame sizes or check if frames already exist.")
@@ -756,7 +763,7 @@ class MainApplication(tk.Tk):
 
         # Update display to show detected frames
         self.update_display()
-        self.status_bar.config(text=f"Detected {len(self.detected_boxes)} potential frames. Click on them to add.")
+        self.status_bar.config(text=f"Detected {len(self.detected_boxes)} potential frames using comprehensive detection. Click on them to add.")
 
     def clear_detected_frames(self):
         """Clear all detected frames."""

@@ -7,10 +7,11 @@ import json
 import csv
 import xml.etree.ElementTree as ET
 import os
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageTk, ImageFilter
 from typing import List, Dict, Tuple, Optional
 import tkinter as tk
 from tkinter import messagebox
+from collections import Counter
 
 
 class FrameData:
@@ -416,7 +417,7 @@ class SpriteSheetProcessor:
     def detect_frames_automatically(self, max_frames: int = 20) -> List[FrameData]:
         """
         Automatically detect potential sprite frames in the sprite sheet.
-        Similar to Texture Packer's sprite extraction - creates selectable frame boundaries.
+        Uses comprehensive multi-strategy detection to work with any sprite sheet type.
 
         Args:
             max_frames: Maximum number of frames to suggest (to avoid UI clutter)
@@ -427,10 +428,27 @@ class SpriteSheetProcessor:
         if self.image is None:
             return []
 
-        detected_frames = []
+        # Try comprehensive sprite detection first
+        sprite_bounds = self.detect_sprites_comprehensive(self.image, max_frames)
+        
+        if sprite_bounds:
+            # Convert bounds to FrameData objects
+            detected_frames = []
+            for i, (x, y, width, height) in enumerate(sprite_bounds):
+                frame_name = f"detected_sprite_{i+1:02d}"
+                detected_frames.append(FrameData(frame_name, x, y, width, height))
+            
+            if len(detected_frames) > 0:
+                print(f"Comprehensive detection found {len(detected_frames)} sprites")
+                return detected_frames[:max_frames]
 
-        # Try to detect frames based on common sprite sheet patterns
-        # Strategy: Look for regular grid patterns and common sprite sizes
+        # Fallback to grid-based detection if comprehensive detection fails
+        print("Falling back to grid-based detection...")
+        return self._detect_frames_grid_fallback(max_frames)
+
+    def _detect_frames_grid_fallback(self, max_frames: int) -> List[FrameData]:
+        """Fallback grid-based frame detection."""
+        detected_frames = []
 
         # Common sprite sizes to try (from largest to smallest)
         common_sizes = [
@@ -500,8 +518,31 @@ class SpriteSheetProcessor:
 
         return detected_frames
 
+    def get_sprite_detection_info(self) -> Dict:
+        """
+        Get information about the sprite detection capabilities.
+        
+        Returns:
+            Dictionary with detection method information
+        """
+        return {
+            "supported_methods": [
+                "Alpha Transparency Detection",
+                "Solid Color Background Detection", 
+                "Color-based Cluster Detection",
+                "Edge Detection for Connected Sprites",
+                "Grid-based Fallback Detection"
+            ],
+            "description": "Comprehensive detection system that automatically tries multiple strategies to work with any sprite sheet type",
+            "legacy_method": "detect_pixel_clusters (alpha-only)",
+            "improved_method": "detect_sprites_comprehensive",
+            "auto_method": "detect_frames_automatically (uses comprehensive detection)"
+        }
+
     def detect_pixel_clusters(self, image):
         """
+        Legacy method - kept for compatibility. Use detect_sprites_comprehensive for better results.
+        
         Detect pixel clusters in the image using flood fill algorithm.
 
         Args:
@@ -548,3 +589,291 @@ class SpriteSheetProcessor:
                         clusters.append((min_x, min_y, max_x - min_x, max_y - min_y))
 
         return clusters
+
+    def detect_sprites_comprehensive(self, image, max_sprites: int = 50) -> List[Tuple[int, int, int, int]]:
+        """
+        Comprehensive sprite detection that tries multiple strategies to work with any sprite sheet.
+        
+        Args:
+            image: PIL Image object
+            max_sprites: Maximum number of sprites to detect
+            
+        Returns:
+            List of tuples (x, y, width, height) for detected sprites
+        """
+        if image is None:
+            return []
+        
+        # Strategy 1: Try alpha transparency detection
+        sprites = self._detect_sprites_alpha(image, max_sprites)
+        if len(sprites) > 0:
+            print(f"Detected {len(sprites)} sprites using alpha transparency")
+            return sprites[:max_sprites]
+        
+        # Strategy 2: Try solid color background detection
+        sprites = self._detect_sprites_background(image, max_sprites)
+        if len(sprites) > 0:
+            print(f"Detected {len(sprites)} sprites using background detection")
+            return sprites[:max_sprites]
+        
+        # Strategy 3: Try color-based cluster detection
+        sprites = self._detect_sprites_color_clusters(image, max_sprites)
+        if len(sprites) > 0:
+            print(f"Detected {len(sprites)} sprites using color clustering")
+            return sprites[:max_sprites]
+        
+        # Strategy 4: Try edge detection for connected sprites
+        sprites = self._detect_sprites_edges(image, max_sprites)
+        if len(sprites) > 0:
+            print(f"Detected {len(sprites)} sprites using edge detection")
+            return sprites[:max_sprites]
+        
+        # Strategy 5: Fallback to grid-based detection
+        sprites = self._detect_sprites_grid(image, max_sprites)
+        print(f"Detected {len(sprites)} sprites using grid-based fallback")
+        return sprites[:max_sprites]
+
+    def _detect_sprites_alpha(self, image, max_sprites: int) -> List[Tuple[int, int, int, int]]:
+        """Detect sprites using alpha transparency."""
+        if image.mode != 'RGBA':
+            return []
+            
+        width, height = image.size
+        visited = set()
+        sprites = []
+
+        for y in range(height):
+            for x in range(width):
+                if len(sprites) >= max_sprites:
+                    break
+                    
+                if (x, y) not in visited:
+                    pixel = image.getpixel((x, y))
+                    if len(pixel) == 4 and pixel[3] > 0:  # Non-transparent pixel
+                        sprite_bounds = self._flood_fill_bounds(image, x, y, visited, 
+                                                              lambda px: len(px) == 4 and px[3] > 0)
+                        if sprite_bounds:
+                            sprites.append(sprite_bounds)
+        
+        return sprites
+
+    def _detect_sprites_background(self, image, max_sprites: int) -> List[Tuple[int, int, int, int]]:
+        """Detect sprites by finding solid color background regions."""
+        try:
+            # Convert to RGB for color analysis
+            rgb_image = image.convert('RGB')
+            width, height = image.size
+            
+            # Find the most common color (likely background)
+            color_counts = Counter()
+            sample_pixels = []
+            
+            # Sample every 10th pixel to speed up analysis
+            for y in range(0, height, 10):
+                for x in range(0, width, 10):
+                    pixel = rgb_image.getpixel((x, y))
+                    color_counts[pixel] += 1
+                    sample_pixels.append(pixel)
+            
+            if not color_counts:
+                return []
+                
+            # Get the most common color (background)
+            background_color = color_counts.most_common(1)[0][0]
+            
+            # Now find regions that are NOT background color
+            visited = set()
+            sprites = []
+            
+            # Create a mask for non-background pixels
+            for y in range(height):
+                for x in range(width):
+                    if len(sprites) >= max_sprites:
+                        break
+                        
+                    if (x, y) not in visited:
+                        pixel = rgb_image.getpixel((x, y))
+                        # Consider pixels that differ significantly from background
+                        if self._color_distance(pixel, background_color) > 30:  # Threshold for color difference
+                            sprite_bounds = self._flood_fill_bounds(image, x, y, visited,
+                                                                  lambda px: self._color_distance(
+                                                                      rgb_image.getpixel((px[0], px[1])), background_color) > 30)
+                            if sprite_bounds:
+                                sprites.append(sprite_bounds)
+            
+            return sprites
+        except Exception as e:
+            print(f"Background detection failed: {e}")
+            return []
+
+    def _detect_sprites_color_clusters(self, image, max_sprites: int) -> List[Tuple[int, int, int, int]]:
+        """Detect sprites by clustering similar colors."""
+        try:
+            rgb_image = image.convert('RGB')
+            width, height = image.size
+            
+            # Sample pixels to find dominant colors
+            samples = []
+            for y in range(0, height, 5):  # Sample every 5th pixel
+                for x in range(0, width, 5):
+                    pixel = rgb_image.getpixel((x, y))
+                    samples.append(pixel)
+            
+            # Find color clusters using simple color quantization
+            color_clusters = []
+            processed_colors = set()
+            
+            for color in samples:
+                if color in processed_colors:
+                    continue
+                    
+                # Find all similar colors (within threshold)
+                cluster = []
+                for other_color in samples:
+                    if (other_color not in processed_colors and 
+                        self._color_distance(color, other_color) < 25):
+                        cluster.append(other_color)
+                        processed_colors.add(other_color)
+                
+                if len(cluster) > 50:  # Only consider significant clusters
+                    color_clusters.append(cluster)
+            
+            if not color_clusters:
+                return []
+                
+            # Create masks for each color cluster
+            sprites = []
+            for cluster in color_clusters:
+                if len(sprites) >= max_sprites:
+                    break
+                    
+                visited = set()
+                # Find first pixel of this color cluster
+                for y in range(height):
+                    for x in range(width):
+                        if (x, y) not in visited:
+                            pixel = rgb_image.getpixel((x, y))
+                            if any(self._color_distance(pixel, cluster_color) < 25 for cluster_color in cluster):
+                                sprite_bounds = self._flood_fill_bounds(image, x, y, visited,
+                                                                      lambda coord: rgb_image.getpixel(coord) and 
+                                                                      any(self._color_distance(rgb_image.getpixel(coord), cluster_color) < 25 
+                                                                          for cluster_color in cluster))
+                                if sprite_bounds and sprite_bounds[2] > 5 and sprite_bounds[3] > 5:  # Filter tiny clusters
+                                    sprites.append(sprite_bounds)
+                                break
+                        if len(sprites) >= max_sprites:
+                            break
+            
+            return sprites
+        except Exception as e:
+            print(f"Color cluster detection failed: {e}")
+            return []
+
+    def _detect_sprites_edges(self, image, max_sprites: int) -> List[Tuple[int, int, int, int]]:
+        """Detect sprites using edge detection."""
+        try:
+            # Convert to grayscale for edge detection
+            gray_image = image.convert('L')
+            
+            # Apply edge detection filter
+            edges = gray_image.filter(ImageFilter.FIND_EDGES)
+            
+            width, height = image.size
+            visited = set()
+            sprites = []
+            
+            # Find edge regions and group them
+            for y in range(height):
+                for x in range(width):
+                    if len(sprites) >= max_sprites:
+                        break
+                        
+                    if (x, y) not in visited:
+                        edge_pixel = edges.getpixel((x, y))
+                        if edge_pixel > 50:  # Significant edge
+                            sprite_bounds = self._flood_fill_bounds(image, x, y, visited,
+                                                                  lambda px: edges.getpixel(px) > 50)
+                            if sprite_bounds and sprite_bounds[2] > 10 and sprite_bounds[3] > 10:  # Filter tiny detections
+                                sprites.append(sprite_bounds)
+            
+            return sprites
+        except Exception as e:
+            print(f"Edge detection failed: {e}")
+            return []
+
+    def _detect_sprites_grid(self, image, max_sprites: int) -> List[Tuple[int, int, int, int]]:
+        """Fallback grid-based detection."""
+        width, height = image.size
+        sprites = []
+        
+        # Try common sprite sizes
+        common_sizes = [(32, 32), (64, 64), (48, 48), (96, 96), (128, 64), (64, 128)]
+        
+        for sprite_width, sprite_height in common_sizes:
+            if len(sprites) >= max_sprites:
+                break
+                
+            if sprite_width > width or sprite_height > height:
+                continue
+                
+            cols = width // sprite_width
+            rows = height // sprite_height
+            
+            # Only try reasonable grids
+            if cols >= 2 and rows >= 2 and cols * rows <= max_sprites:
+                for row in range(min(rows, max_sprites // cols + 1)):
+                    for col in range(min(cols, max_sprites // rows + 1)):
+                        if len(sprites) >= max_sprites:
+                            break
+                            
+                        x = col * sprite_width
+                        y = row * sprite_height
+                        sprites.append((x, y, sprite_width, sprite_height))
+        
+        return sprites
+
+    def _flood_fill_bounds(self, image, start_x, start_y, visited, is_sprite_pixel_func) -> Optional[Tuple[int, int, int, int]]:
+        """Helper method to find bounds of a sprite using flood fill."""
+        width, height = image.size
+        stack = [(start_x, start_y)]
+        visited.add((start_x, start_y))
+        
+        min_x, max_x = start_x, start_x
+        min_y, max_y = start_y, start_y
+        
+        while stack:
+            cx, cy = stack.pop()
+            
+            # Update bounds
+            min_x = min(min_x, cx)
+            max_x = max(max_x, cx)
+            min_y = min(min_y, cy)
+            max_y = max(max_y, cy)
+            
+            # Check 4-connected neighbors
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nx, ny = cx + dx, cy + dy
+                
+                if (0 <= nx < width and 0 <= ny < height and 
+                    (nx, ny) not in visited and 
+                    is_sprite_pixel_func((nx, ny))):
+                    
+                    visited.add((nx, ny))
+                    stack.append((nx, ny))
+        
+        # Return bounds as (x, y, width, height)
+        sprite_width = max_x - min_x + 1
+        sprite_height = max_y - min_y + 1
+        
+        # Filter out unreasonably large or small sprites
+        if (5 <= sprite_width <= width and 5 <= sprite_height <= height and
+            sprite_width * sprite_height > 100):  # Minimum area threshold
+            return (min_x, min_y, sprite_width, sprite_height)
+        
+        return None
+
+    def _color_distance(self, color1, color2) -> float:
+        """Calculate Euclidean distance between two RGB colors."""
+        return ((color1[0] - color2[0]) ** 2 + 
+                (color1[1] - color2[1]) ** 2 + 
+                (color1[2] - color2[2]) ** 2) ** 0.5

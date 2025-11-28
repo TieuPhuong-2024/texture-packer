@@ -365,31 +365,44 @@ class MainApplication(tk.Tk):
             self.preview_text.insert(tk.END, f"{frame.name},{frame.x},{frame.y},{frame.width},{frame.height}\n")
 
         # Show XML preview
-        self.preview_text.insert(tk.END, "\n\nXML Format Preview:\n\n")
+        self.preview_text.insert(tk.END, "\n\nXML Format Preview (TexturePacker):\n\n")
         import xml.etree.ElementTree as ET
         from xml.dom import minidom
 
-        # Create XML structure for preview
-        root = ET.Element("sprite_sheet_data")
-        ET.SubElement(root, "sprite_sheet").text = self.processor.original_filename
-        ET.SubElement(root, "sheet_width").text = str(self.processor.sheet_width)
-        ET.SubElement(root, "sheet_height").text = str(self.processor.sheet_height)
-        ET.SubElement(root, "total_frames").text = str(len(self.processor.frames))
+        # Create XML structure in TexturePacker format for preview
+        root = ET.Element("TextureAtlas")
+        root.set("imagePath", self.processor.original_filename)
+        root.set("width", str(self.processor.sheet_width))
+        root.set("height", str(self.processor.sheet_height))
 
-        frames_element = ET.SubElement(root, "frames")
-        for frame in self.processor.frames:
-            frame_element = ET.SubElement(frames_element, "frame")
-            ET.SubElement(frame_element, "name").text = frame.name
-            ET.SubElement(frame_element, "x").text = str(frame.x)
-            ET.SubElement(frame_element, "y").text = str(frame.y)
-            ET.SubElement(frame_element, "width").text = str(frame.width)
-            ET.SubElement(frame_element, "height").text = str(frame.height)
+        # Add first few sprites for preview
+        for frame in self.processor.frames[:3]:  # Show only first 3 frames in preview
+            sprite_element = ET.SubElement(root, "sprite")
+            sprite_element.set("n", frame.name)
+            sprite_element.set("x", str(frame.x))
+            sprite_element.set("y", str(frame.y))
+            sprite_element.set("w", str(frame.width))
+            sprite_element.set("h", str(frame.height))
+            sprite_element.set("pX", "0.5")
+            sprite_element.set("pY", "0.5")
+
+        # Add ellipsis if there are more frames
+        if len(self.processor.frames) > 3:
+            comment = ET.Comment("... more sprites ...")
+            root.append(comment)
 
         # Pretty print XML for preview
         rough_string = ET.tostring(root, encoding='unicode')
         reparsed = minidom.parseString(rough_string)
         xml_preview = reparsed.toprettyxml(indent="  ")
-        self.preview_text.insert(tk.END, xml_preview)
+
+        # Add XML declaration and comments for preview
+        preview_xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        preview_xml += '<!-- Created with Texture Packer Tool -->\n'
+        preview_xml += '<!-- Format: n=>name, x=>x pos, y=>y pos, w=>width, h=>height, pX=>pivot x, pY=>pivot y -->\n'
+        preview_xml += xml_preview
+
+        self.preview_text.insert(tk.END, preview_xml)
     
     def export_to_json(self):
         """Export frame data to JSON file."""

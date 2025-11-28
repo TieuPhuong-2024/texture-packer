@@ -253,7 +253,7 @@ class SpriteSheetProcessor:
 
     def export_to_xml(self, file_path: str) -> bool:
         """
-        Export frame data to XML file.
+        Export frame data to XML file in TexturePacker format.
 
         Args:
             file_path: Path to save the XML file
@@ -262,29 +262,45 @@ class SpriteSheetProcessor:
             bool: True if exported successfully, False otherwise
         """
         try:
-            # Create root element
-            root = ET.Element("sprite_sheet_data")
+            # Create root element with TextureAtlas format
+            root = ET.Element("TextureAtlas")
+            root.set("imagePath", self.original_filename)
+            root.set("width", str(self.sheet_width))
+            root.set("height", str(self.sheet_height))
 
-            # Add sprite sheet metadata
-            ET.SubElement(root, "sprite_sheet").text = self.original_filename
-            ET.SubElement(root, "sheet_width").text = str(self.sheet_width)
-            ET.SubElement(root, "sheet_height").text = str(self.sheet_height)
-            ET.SubElement(root, "total_frames").text = str(len(self.frames))
-
-            # Add frames
-            frames_element = ET.SubElement(root, "frames")
+            # Add sprites
             for frame in self.frames:
-                frame_element = ET.SubElement(frames_element, "frame")
-                ET.SubElement(frame_element, "name").text = frame.name
-                ET.SubElement(frame_element, "x").text = str(frame.x)
-                ET.SubElement(frame_element, "y").text = str(frame.y)
-                ET.SubElement(frame_element, "width").text = str(frame.width)
-                ET.SubElement(frame_element, "height").text = str(frame.height)
+                sprite_element = ET.SubElement(root, "sprite")
+                sprite_element.set("n", frame.name)
+                sprite_element.set("x", str(frame.x))
+                sprite_element.set("y", str(frame.y))
+                sprite_element.set("w", str(frame.width))
+                sprite_element.set("h", str(frame.height))
+                # Default pivot points (center)
+                sprite_element.set("pX", "0.5")
+                sprite_element.set("pY", "0.5")
 
             # Write to file with pretty formatting
             tree = ET.ElementTree(root)
             ET.indent(tree, space="  ", level=0)
-            tree.write(file_path, encoding='utf-8', xml_declaration=True)
+
+            # Write XML declaration and comments
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<!-- Created with Texture Packer Tool -->\n')
+                f.write('<!-- Format:\n')
+                f.write('n  => name of the sprite\n')
+                f.write('x  => sprite x pos in texture\n')
+                f.write('y  => sprite y pos in texture\n')
+                f.write('w  => sprite width\n')
+                f.write('h  => sprite height\n')
+                f.write('pX => x pos of the pivot point (relative to sprite width)\n')
+                f.write('pY => y pos of the pivot point (relative to sprite height)\n')
+                f.write('-->\n')
+
+                # Write the XML content
+                tree.write(f, encoding='unicode', xml_declaration=False)
+
             return True
         except Exception as e:
             print(f"Error exporting to XML: {e}")

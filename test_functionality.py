@@ -60,17 +60,25 @@ def test_sprite_sheet_processor():
         print(f"[OK] Exported to CSV: {csv_file}")
     else:
         print("[FAIL] Failed to export to CSV")
+
+    # Test 6: Export to XML
+    print("\n6. Exporting to XML...")
+    xml_file = project_root / "test_export.xml"
+    if processor.export_to_xml(str(xml_file)):
+        print(f"[OK] Exported to XML: {xml_file}")
+    else:
+        print("[FAIL] Failed to export to XML")
     
-    # Test 6: Save sprite sheet image
-    print("\n6. Saving sprite sheet image...")
+    # Test 7: Save sprite sheet image
+    print("\n7. Saving sprite sheet image...")
     image_file = project_root / "test_sprite_sheet.png"
     if processor.save_sprite_sheet(str(image_file)):
         print(f"[OK] Saved sprite sheet image: {image_file}")
     else:
         print("[FAIL] Failed to save sprite sheet image")
     
-    # Test 7: Test frame extraction
-    print("\n7. Testing frame extraction...")
+    # Test 8: Test frame extraction
+    print("\n8. Testing frame extraction...")
     if processor.frames:
         first_frame = processor.frames[0]
         extracted = processor.extract_frame_image(first_frame)
@@ -79,34 +87,34 @@ def test_sprite_sheet_processor():
             print(f"  - Extracted size: {extracted.size}")
         else:
             print("[FAIL] Failed to extract frame image")
-    
-    # Test 8: Test frame operations
-    print("\n8. Testing frame operations...")
-    
+
+    # Test 9: Test frame operations
+    print("\n9. Testing frame operations...")
+
     # Get frame
     frame = processor.get_frame("custom_frame")
     if frame:
         print(f"[OK] Found frame: {frame.name}")
-        
+
         # Update frame
         if processor.update_frame("custom_frame", "updated_frame", 210, 210, 32, 32):
             print("[OK] Frame updated successfully")
         else:
             print("[FAIL] Failed to update frame")
-        
+
         # Remove frame
         if processor.remove_frame("updated_frame"):
             print("[OK] Frame removed successfully")
         else:
             print("[FAIL] Failed to remove frame")
-    
-    print(f"\n9. Final frame count: {processor.get_frame_count()}")
-    
-    # Test 9: Load from JSON
-    print("\n10. Testing load from JSON...")
+
+    print(f"\n10. Final frame count: {processor.get_frame_count()}")
+
+    # Test 10: Load from JSON
+    print("\n11. Testing load from JSON...")
     processor.clear_frames()
     print(f"  - Frames after clear: {processor.get_frame_count()}")
-    
+
     if processor.load_from_json(str(json_file)):
         print(f"[OK] Loaded frames from JSON: {processor.get_frame_count()} frames")
     else:
@@ -116,7 +124,7 @@ def test_sprite_sheet_processor():
     
     # Cleanup test files
     print("\nCleaning up test files...")
-    for test_file in [json_file, csv_file, image_file]:
+    for test_file in [json_file, csv_file, xml_file, image_file]:
         if test_file.exists():
             test_file.unlink()
             print(f"  Removed: {test_file.name}")
